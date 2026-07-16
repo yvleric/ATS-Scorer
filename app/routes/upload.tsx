@@ -1,22 +1,54 @@
-import React, { useState, type FormEvent } from "react";
-import type { Route } from "./+types/upload";
-import Navbar from "../components/Navbar";
-import FileUploader from "../components/FileUploader";
-
-
+import { type FormEvent, useState } from 'react'
+import Navbar from "~/components/Navbar";
+import FileUploader from "~/components/FileUploader";
+import { convertPdfToImage } from '~/lib/pdf2img';
+import { useNavigate, type NavigateFunction } from 'react-router';
+import { usePuterStore } from '~/lib/puter';
 const Upload = () => {
-    const [isProcessing, setProcessing] = useState(true);
+    const { auth, isLoading, fs, ai, kv } = usePuterStore();
+    const navigate: NavigateFunction = useNavigate();
+    const [isProcessing, setProcessing] = useState(false);
     const [statusText, setStatusText] = useState('');
     const [file, setFile] = useState<File | null>(null);
 
-    const handleFileSelect = (file: File | null) => {
+    const handleFileSelect: (file: File | null) => void = (file: File | null) => {
         setFile(file);
     }
 
-    const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    const handleAnalyze = async ({ companyName, jobTitle, jobDescription, file }: { companyName: string, jobTitle: string, jobDescription: string, file: File }) => {
+        setProcessing(true);
+        setStatusText('Uploading the file...');
 
+        const uploadedFile = await fs.upload([file]);
+        if (!uploadedFile) {
+            setStatusText('Error: Failed to upload file');
+            return;
+        }
+
+        setStatusText('Converting to image...');
+        const imageFile = await convertPdfToImage(file);
+        if (!imageFile.file) {
+            setStatusText('Error: Failed to convert PDF to image');
+            return;
+        }
+        setStatusText('Uploading the image...');
+        const finalImageFile = await fs.upload([imageFile.file]);
     }
 
+    const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        const form = e.currentTarget.closest('form');
+        if (!form) return;
+        const formData = new FormData(form);
+
+        const companyName = formData.get('company-name') as string;
+        const jobTitle = formData.get('job-title') as string;
+        const jobDescription = formData.get('job-description') as string;
+
+        if (!file) return;
+
+        handleAnalyze({ companyName, jobTitle, jobDescription, file });
+    }
 
     return (
         <main className="bg-[url('/images/bg-main.svg')] bg-cover">
@@ -51,6 +83,8 @@ const Upload = () => {
                                 <label htmlFor="uploader">Upload Resume</label>
                                 <FileUploader onFileSelect={handleFileSelect} />
                             </div>
+
+
                             <button className="primary-button" type="submit">
                                 Analyze Resume
                             </button>
