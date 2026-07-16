@@ -4,6 +4,9 @@ import FileUploader from "~/components/FileUploader";
 import { convertPdfToImage } from '~/lib/pdf2img';
 import { useNavigate, type NavigateFunction } from 'react-router';
 import { usePuterStore } from '~/lib/puter';
+import { prepareInstructions } from '../../constants';
+import { generateUUID } from '~/lib/utils';
+
 const Upload = () => {
     const { auth, isLoading, fs, ai, kv } = usePuterStore();
     const navigate: NavigateFunction = useNavigate();
@@ -33,6 +36,45 @@ const Upload = () => {
         }
         setStatusText('Uploading the image...');
         const finalImageFile = await fs.upload([imageFile.file]);
+        if (finalImageFile && finalImageFile.path) {
+            setStatusText('Analyzing your resume with AI...');
+            const message = prepareInstructions({ jobTitle, jobDescription });
+            const response = await ai.feedback(finalImageFile.path, message);
+            if (response && response.message && response.message.content) {
+                let content = response.message.content as string;
+                if (Array.isArray(content)) {
+                    content = content.map(c => typeof c === 'string' ? c : c.text || '').join('\n');
+                }
+                
+                try {
+                    const jsonStr = content.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const feedback = JSON.parse(jsonStr);
+                    
+                    const id = generateUUID();
+                    const newResume: Resume = {
+                        id,
+                        companyName,
+                        jobTitle,
+                        imagePath: finalImageFile.path,
+                        resumePath: uploadedFile.path,
+                        feedback
+                    };
+                    
+                    await kv.set(id, JSON.stringify(newResume));
+                    navigate(`/resume/${id}`);
+                } catch(e) {
+                    setStatusText('Error: Failed to parse AI response');
+                    console.error(e, content);
+                    setProcessing(false);
+                }
+            } else {
+                setStatusText('Error: Failed to analyze resume');
+                setProcessing(false);
+            }
+        } else {
+            setStatusText('Error: Failed to upload image to Puter');
+            setProcessing(false);
+        }
     }
 
     const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -60,13 +102,13 @@ const Upload = () => {
                     {isProcessing ? (
                         <>
                             <h2>{statusText}</h2>
-                            <img src="/images/resume-scan.gif" className="w-full" />
+                            <img src="/images/resume-scan.gif" className="w-full max-w-md" />
                         </>
                     ) : (
                         <h2>Drop your resume for an ATS score and improvement tips</h2>
                     )}
                     {!isProcessing && (
-                        <form id="upload-form" onSubmit={handleSubmit} className="flex flex-col gap-4 mt-8">
+                        <form id="upload-form" onSubmit={handleSubmit} className="flex flex-col gap-4 mt-8 w-full max-w-2xl mx-auto">
                             <div className="form-div">
                                 <label htmlFor="company-name">Company Name</label>
                                 <input type="text" name="company-name" placeholder="Company Name" id="company-name" />
